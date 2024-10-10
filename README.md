@@ -74,6 +74,45 @@ Software Requirements
 
 -   **LAMP Stack** (Linux, Apache, MySQL, PHP): If you plan to store data on a server.
 
+-   **Create a Database**
+
+1.  Access MySQL:
+
+
+    `sudo mysql -u root -p`
+
+2.  Create a database:
+
+
+    `CREATE DATABASE engine_monitoring;`
+
+3.  Create a table:
+
+
+    ```USE engine_monitoring;
+    
+    CREATE TABLE temperature_data (
+    
+        id INT AUTO_INCREMENT PRIMARY KEY,
+    
+        timestamp DATETIME,
+    
+        temperature FLOAT,
+    
+        max_temperature FLOAT,
+    
+        threshold_exceeded BOOLEAN) ;
+
+    ```
+    
+
+5.  Exit MySQL:
+
+
+    `EXIT;`
+
+
+
 Usage Instructions
 ------------------
 
