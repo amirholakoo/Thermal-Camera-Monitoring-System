@@ -1,0 +1,147 @@
+import machine
+import ssd1306
+import time
+from machine import Pin, PWM, I2C
+
+# I2C setup for OLED (using I2C1 with GPIO 18 as SDA and GPIO 19 as SCL)
+i2c = I2C(1, scl=Pin(19), sda=Pin(18))
+oled = ssd1306.SSD1306_I2C(128, 64, i2c)
+
+# Setup for Servo Motor on PWM pin 15 (Pin 20)
+servo = PWM(Pin(15))
+servo.freq(50)
+
+# Adjusted function to control servo position with the new duty cycle range for MG995
+def set_servo_angle(angle):
+    # Constrain angle to be within 0 and 180 degrees
+    angle = max(0, min(180, angle))  # Ensure angle is within valid range
+    # Duty cycle range fine-tuned for MG995: 500 to 2500 (approx.) for 0-180 degrees
+    duty_cycle = int((angle / 180.0) * (2500 - 500) + 500)  # Adjust duty cycle for full range
+    servo.duty_u16(int(duty_cycle * 65535 / 20000))  # Convert to 16-bit value
+    return angle
+
+# Function to draw larger text by doubling the size of each pixel
+def draw_large_text(text, x, y):
+    for i, char in enumerate(text):
+        oled.text(char, x + (i * 12), y)
+        oled.text(char, x + (i * 12) + 1, y)  # Draw twice horizontally for bigger font
+
+# Function to draw a percentage bar with the percentage value
+def draw_percentage_bar(percentage, x, y, width=100, height=10):
+    filled_width = int((percentage / 100.0) * width)
+    oled.rect(x, y, width, height, 1)  # Draw the outline of the bar
+    oled.fill_rect(x, y, filled_width, height, 1)  # Fill the bar based on percentage
+    oled.text("{:.0f}%".format(percentage), x + width + 5, y + 1)  # Show percentage next to bar
+
+# Function to display an error on the yellow section of the OLED
+def display_error(message):
+    oled.fill_rect(0, 0, 128, 16, 0)  # Clear the yellow section
+    oled.text(message, 0, 0)  # Display error message in the yellow section
+    oled.show()
+
+# Function to select the PID tuning mode
+def select_mode():
+    print("Select a mode (1-5):")
+    print("1. Very Slow Response")
+    print("2. Slow Response")
+    print("3. Moderate Response")
+    print("4. Fast Response")
+    print("5. Very Fast Response")
+    
+    mode = 0
+    while mode not in [1, 2, 3, 4, 5]:
+        try:
+            mode = int(input("Enter mode number (1-5): "))
+        except ValueError:
+            print("Invalid input. Please enter a number between 1 and 5.")
+    
+    return mode
+
+# Set PID constants based on mode
+def set_pid_constants(mode):
+    if mode == 1:
+        return 0.2, 0.05, 0.01  # Very Slow Response (Low PID values)
+    elif mode == 2:
+        return 0.5, 0.1, 0.05   # Slow Response
+    elif mode == 3:
+        return 0.8, 0.15, 0.1   # Moderate Response
+    elif mode == 4:
+        return 1.0, 0.2, 0.15   # Fast Response
+    elif mode == 5:
+        return 1.5, 0.3, 0.2    # Very Fast Response (High PID values)
+
+# Main control loop
+mode = select_mode()  # Ask user to select the mode
+Kp, Ki, Kd = set_pid_constants(mode)  # Set PID constants based on mode
+
+# Initialize PID terms
+target_voltage = 220  # Desired output voltage
+previous_error = 0
+integral = 0
+
+# Safety variables
+low_voltage_time = 0
+high_voltage_time = 0
+low_voltage_threshold = 200  # Voltage below this is unsafe
+high_voltage_threshold = 240  # Voltage above this is unsafe
+
+# Safety time limits
+max_low_voltage_duration = 10  # Max time to allow under-voltage
+max_high_voltage_duration = 5  # Max time to allow over-voltage
+
+while True:
+    # Simulate voltage by manually entering a value
+    try:
+        simulated_voltage = float(input("Enter simulated voltage (0-250V): "))
+    except ValueError:
+        print("Invalid input, please enter a number.")
+        continue
+    
+    # PID control logic
+    error = target_voltage - simulated_voltage
+    integral += error
+    derivative = error - previous_error
+    pid_output = (Kp * error) + (Ki * integral) + (Kd * derivative)
+    
+    # Adjust servo based on PID output (limit between 0 and 180 degrees)
+    new_angle = min(max(0, pid_output), 180)
+    actual_angle = set_servo_angle(new_angle)  # Ensure the angle is valid with the new duty cycle range
+    
+    # Safety Checks
+    if simulated_voltage < low_voltage_threshold and actual_angle == 180:
+        low_voltage_time += 1
+        if low_voltage_time >= max_low_voltage_duration:
+            display_error("Low Voltage! Overload")
+            break  # Stop the program for safety
+    else:
+        low_voltage_time = 0  # Reset if conditions are normal
+    
+    if simulated_voltage > high_voltage_threshold and actual_angle == 0:
+        high_voltage_time += 1
+        if high_voltage_time >= max_high_voltage_duration:
+            display_error("High Voltage! Problem")
+            break  # Stop the program for safety
+    else:
+        high_voltage_time = 0  # Reset if conditions are normal
+    
+    # Clear the OLED display
+    oled.fill_rect(0, 16, 128, 48, 0)  # Clear only the blue section
+    oled.text("Voltage Control", 0, 16)
+    oled.text("Target: 220V", 0, 28)
+    oled.text("Current: {:.0f}V".format(simulated_voltage), 0, 40)
+    
+    # Display the larger servo angle
+    draw_large_text("{:.0f} deg".format(actual_angle), 0, 52)
+    
+    # Display the percentage bar with percentage value
+    percentage = (actual_angle / 180.0) * 100  # Calculate percentage based on servo angle
+    draw_percentage_bar(percentage, 0, 52, width=100, height=10)
+    
+    # Update OLED display
+    oled.show()
+
+    # Update previous error for PID
+    previous_error = error
+    
+    # Small delay for stability
+    time.sleep(0.05)  # Shorter delay for faster response
